@@ -1,44 +1,14 @@
 import React, { useState, useEffect, useReducer, useMemo, useCallback } from 'react';
 
-/**
- * Community Newsletter CMS
- * Single-file, zero-dependency React implementation containing:
- * 1. Simple Token/Session Authentication
- * 2. Markdown Editor with live preview & shortcut controls
- * 3. Draft/Publish State Management & Workflow
- * 4. Public Announcement Feed & Search/Filter
- */
+// --- BACKEND API URL CONFIGURATION ---
+// Replace the URL inside quotes with your actual Render URL!
+const RENDER_URL = 'https://community-cms.onrender.com';
+const LOCAL_URL = 'http://localhost:3001/api/posts';
 
-// --- IN-MEMORY DATABASE & STORAGE HELPER ---
-const STORAGE_KEY = 'community_cms_posts_v1';
+// Automatically uses Localhost when testing on your computer, and Render when live on Vercel
+const API_URL = window.location.hostname === 'localhost' ? LOCAL_URL : RENDER_URL;
+
 const AUTH_KEY = 'community_cms_auth_v1';
-
-const getInitialPosts = () => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
-  } catch (e) {
-    console.error('Failed to load posts from storage:', e);
-  }
-  return [
-    {
-      id: '1',
-      title: 'Welcome to the Neighborhood Newsletter!',
-      content: 'We are thrilled to launch our new **community platform**. Stay tuned for monthly updates, event schedules, and volunteer opportunities!\n\n### Upcoming Highlights\n- *Park Cleanup*: Saturday at 9 AM\n- *Town Hall*: Next Tuesday at 7 PM',
-      status: 'published',
-      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-      updatedAt: new Date(Date.now() - 86400000 * 3).toISOString()
-    },
-    {
-      id: '2',
-      title: '[Draft] Road Maintenance Schedule - Summer',
-      content: 'Main street will undergo resurfacing starting next month.',
-      status: 'draft',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-  ];
-};
 
 // --- LIGHTWEIGHT MARKDOWN PARSER ---
 function renderMarkdown(text = '') {
@@ -61,27 +31,25 @@ function renderMarkdown(text = '') {
 
 // --- MAIN APPLICATION COMPONENT ---
 export default function CommunityCMS() {
-  const [posts, setPosts] = useState(getInitialPosts);
+  const [posts, setPosts] = useState([]);
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem(AUTH_KEY) === 'true';
   });
-  const [currentView, setCurrentView] = useState('feed'); // 'feed' | 'admin'
+  const [currentView, setCurrentView] = useState('feed'); // 'feed' | 'admin' | 'login'
   const [editingPost, setEditingPost] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // Sync to LocalStorage on change
+  // 1. Fetch posts from backend API when app loads
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(posts));
-    } catch (e) {
-      console.error('Failed to persist posts:', e);
-    }
-  }, [posts]);
+    fetch(API_URL)
+      .then((res) => res.json())
+      .then((data) => setPosts(data))
+      .catch((err) => console.error('Failed to fetch posts from server:', err));
+  }, []);
 
   // Auth Handlers
   const handleLogin = useCallback((username, password) => {
-    // Basic local admin authentication demo
     if (username === 'admin' && password === 'admin123') {
       setIsAuthenticated(true);
       localStorage.setItem(AUTH_KEY, 'true');
@@ -98,44 +66,62 @@ export default function CommunityCMS() {
     setCurrentView('feed');
   }, []);
 
-  // Post CRUD Actions
-  const handleSavePost = useCallback((postData) => {
-    setPosts((prevPosts) => {
-      const now = new Date().toISOString();
-      if (postData.id) {
-        return prevPosts.map((p) =>
-          p.id === postData.id ? { ...postData, updatedAt: now } : p
-        );
-      } else {
-        const newPost = {
-          ...postData,
-          id: Date.now().toString(),
-          createdAt: now,
-          updatedAt: now
-        };
-        return [newPost, ...prevPosts];
-      }
-    });
-    setEditingPost(null);
-  }, []);
+  // 2. Save or Update Post via backend API
+  const handleSavePost = useCallback(async (postData) => {
+    const method = postData.id ? 'PUT' : 'POST';
+    const url = postData.id ? `${API_URL}/${postData.id}` : API_URL;
 
-  const handleDeletePost = useCallback((id) => {
-    if (window.confirm('Are you sure you want to delete this post?')) {
-      setPosts((prev) => prev.filter((p) => p.id !== id));
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(postData),
+      });
+      const savedPost = await res.json();
+
+      setPosts((prev) =>
+        postData.id
+          ? prev.map((p) => (p.id === savedPost.id ? savedPost : p))
+          : [savedPost, ...prev]
+      );
+      setEditingPost(null);
+    } catch (err) {
+      console.error('Failed to save post:', err);
     }
   }, []);
 
-  const handleToggleStatus = useCallback((id) => {
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id === id) {
-          const newStatus = p.status === 'published' ? 'draft' : 'published';
-          return { ...p, status: newStatus, updatedAt: new Date().toISOString() };
-        }
-        return p;
-      })
-    );
+  // 3. Delete Post via backend API
+  const handleDeletePost = useCallback(async (id) => {
+    if (!window.confirm('Are you sure you want to delete this post?')) return;
+    try {
+      await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
+      setPosts((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      console.error('Failed to delete post:', err);
+    }
   }, []);
+
+  // 4. Toggle Post Status (Draft/Published) via backend API
+  const handleToggleStatus = useCallback(async (id) => {
+    const postToUpdate = posts.find((p) => p.id === id);
+    if (!postToUpdate) return;
+
+    const updatedStatus = postToUpdate.status === 'published' ? 'draft' : 'published';
+    const updatedPost = { ...postToUpdate, status: updatedStatus };
+
+    try {
+      const res = await fetch(`${API_URL}/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedPost),
+      });
+      const data = await res.json();
+
+      setPosts((prev) => prev.map((p) => (p.id === id ? data : p)));
+    } catch (err) {
+      console.error('Failed to toggle post status:', err);
+    }
+  }, [posts]);
 
   // Filtered public feed
   const publishedPosts = useMemo(() => {
