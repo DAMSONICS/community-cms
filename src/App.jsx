@@ -2,8 +2,7 @@ import React, { useState, useEffect, useReducer, useMemo, useCallback } from 're
 
 // --- BACKEND API URL CONFIGURATION ---
 // Replace the URL inside quotes with your actual Render URL!
-const RENDER_URL = 'https://community-cms.onrender.com';
-const LOCAL_URL = 'http://localhost:3001/api/posts';
+const const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/posts';
 
 // Automatically uses Localhost when testing on your computer, and Render when live on Vercel
 const API_URL = window.location.hostname === 'localhost' ? LOCAL_URL : RENDER_URL;
